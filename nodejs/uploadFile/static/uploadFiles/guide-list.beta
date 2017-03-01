@@ -1,0 +1,325 @@
+function GuideList() {
+    this.pageSize = 20;
+};
+
+GuideList.prototype.getGuideList = function (clear, params, scrollTop) {
+    var _this = this,
+            sizeOfPage = $('li.guide-article-info').length;
+
+    !params.pageNum && (params.pageNum = Math.ceil(sizeOfPage / this.pageSize));
+
+    // 默认最新
+    // TYPE = 1: 获取全部最新攻略, type, pageNum
+    // TYPE = 2: 获取全部最热攻略, type, pageNum
+    // TYPE = 3: 获取分类最新攻略, type, pageNum, level, cateID
+    // TYPE = 4: 获取分类最热攻略, type, pageNum, level, cateID
+
+    $.ajax({
+        url: GUIDE_CONFIG.ajaxListUrl,
+        data: params,
+        dataType: 'JSON',
+        type: 'post'
+    }).success(function (res) {
+        $('.load-more').toggleClass('hidden', !res.data.hasMore).next().removeClass('isloading');
+        $('.guide-article-list')[clear ? 'html': 'append'](res.data.html);
+        scrollTop && $('body').scrollTop(scrollTop);
+        localStorage.setItem('pageNum', Math.ceil($('.guide-article-list .guide-article-info').length / _this.pageSize));
+
+        if ($.trim(res.data.html).length && res.data.html.indexOf('shopping-cart') > -1) {
+            var containerWidth = 0;
+            
+            if (GUIDE_CONFIG.iScrollInstance) {
+                for (var i in GUIDE_CONFIG.iScrollInstance) {
+                    GUIDE_CONFIG.iScrollInstance[i].destroy();
+                }
+            }
+
+            GUIDE_CONFIG.iScrollInstance = []; 
+
+            if ($('.guide-article-list .shopping-cart').length) {
+                $('.guide-article-list .cart-container').each(function (index, cart) {
+                    $(cart).find('.cart-item').each(function () {
+                        containerWidth += $(this).outerWidth();
+                    });
+                    $(cart).find('.shopping-cart').width(containerWidth + 10);
+                    containerWidth = 0;
+                    GUIDE_CONFIG.iScrollInstance.push(new IScroll($('.guide-article-list .cart-container:eq(' + index + ')')[0], {eventPassthrough: true, scrollX: true, scrollY: false, preventDefault: false}));
+                });
+            }
+        }
+    });
+};
+
+GuideList.prototype.getParams4List = function (key, clear) {
+    var params = {},
+            topCate = $('.nav-item.cur'),
+            subCate = $('.sub-navigate .selected .sub-nav-item.selected');
+
+    if (subCate.length) {
+        if (subCate.attr('level')) {
+            params.type = key == '热门' ? 4 : 3;
+            params.level = subCate.attr('level');
+            params.id = subCate.attr('cateid');
+            params.pageNum = clear ? 1 : Math.ceil($('li.guide-article-info').length / this.pageSize + 1);
+        } else {
+            params.type = key == '热门' ? 4 : 3;
+            params.level = topCate.attr('level');
+            params.id = topCate.attr('cateid');
+            params.pageNum = clear ? 1 : Math.ceil($('li.guide-article-info').length / this.pageSize + 1);
+        }
+    } else {
+        if (topCate.attr('id')) {
+            params.type = key == '热门' ? 4 : 3;
+            params.level = topCate.attr('level');
+            params.id = topCate.attr('cateid');
+            params.pageNum = clear ? 1 : Math.ceil($('li.guide-article-info').length / this.pageSize + 1);
+        } else {
+            params.type = key == '热门' ? 2 : 1;
+            params.pageNum = clear ? 1 : Math.ceil($('li.guide-article-info').length / this.pageSize + 1);
+        }
+    }
+
+    return params;
+};
+
+GuideList.prototype.setNavigation = function () {
+    var params = {},
+            top = localStorage.getItem('top'),
+            sub = localStorage.getItem('sub'),
+            key = localStorage.getItem('key'),
+            pageNum = localStorage.getItem('pageNum'),
+            scrollTop = localStorage.getItem('scrollTop'),
+            pageSize = pageNum > 1 ? pageNum * this.pageSize : null;
+
+    if (key == '热门') {
+        $('.sort-menu span.sort-type').html('热门');
+        $('.sort-menu li[key="热门"').addClass('selected').siblings('.selected').removeClass('selected');
+    }
+
+    if (null != top || pageNum > 1) {
+        if ('undefined' != top && null != top) {
+            $('nav .cur').removeClass('cur').siblings('[cateid=' + top + ']').addClass('cur');
+            $('.sub-nav-items[id*="_' + top + '_"]').addClass('selected');
+            this.showCurNavItem();
+            params = {
+                type: key == '热门' ? 4 : 3,
+                pageNum: 1,
+                level: 1,
+                id: top
+            };
+
+            pageSize && (params.pageSize = pageSize);
+
+            if ('undefined' != sub && null != sub) {
+                $('.sub-nav-items.selected li[cateid=' + sub + ']').addClass('selected').siblings('.selected').removeClass('selected');
+                params.id = sub;
+                params.level = 2;
+            }
+
+            this.setIScroll($('.sub-nav-items[id*="_' + top + '_"]'), top);
+
+            this.getGuideList(true, params, scrollTop);
+        } else {
+            params = {
+                type: key == '热门' ? 2 : 1,
+                pageNum: 1 
+            };
+
+            pageSize && (params.pageSize = pageSize);
+
+            if (key == '热门' || pageNum > 1 ) {
+                this.getGuideList(true, params, scrollTop);
+            }
+        }
+    } else {// 直接滚动到上次的位置
+        $('body').scrollTop(scrollTop);
+    }
+}
+
+GuideList.prototype.showCurNavItem = function () {
+    var curLeft = 0,
+            navWidth = 0,
+            nav = $('nav'),
+            cur = nav.find('.cur');
+
+    cur.prevAll().each(function() {
+        curLeft += $(this).width();
+    });
+    
+    navWidth = nav.width() - parseInt(nav.css('padding-left'), 10) - parseInt(nav.css('padding-right'), 10);
+
+    if (curLeft + cur.width() > navWidth) {
+        nav.scrollLeft(curLeft + cur.width() - navWidth);
+    }
+}
+
+GuideList.prototype.setIScroll = function (item, id) {
+    // guide list page: 子类滚动
+    var containerWidth = 0;
+
+    if (!GUIDE_CONFIG.subNavigete[id]) {
+        item.parent().find('.sub-nav-item').each(function () {
+            containerWidth += $(this).outerWidth() + 7;
+        });
+        item.width(containerWidth);
+        GUIDE_CONFIG.subNavigete[id] = new IScroll(item.parent()[0],  {eventPassthrough: true, scrollX: true, scrollY: false, preventDefault: false});
+    }
+}
+
+function useIScroll () {
+    var containerWidth = 0;
+
+    GUIDE_CONFIG.iScrollInstance = [];
+
+    // 购物车滚动
+    if ($('.guide-article-list .shopping-cart').length) {
+        $('.guide-article-list .cart-container').each(function (index, cart) {
+            $(cart).find('.cart-item').each(function () {
+                containerWidth += $(this).outerWidth();
+            });
+            $(cart).find('.shopping-cart').width(containerWidth + 10);
+            containerWidth = 0;
+            GUIDE_CONFIG.iScrollInstance.push(new IScroll($('.guide-article-list .cart-container:eq(' + index + ')')[0], {eventPassthrough: true, scrollX: true, scrollY: false, preventDefault: false}));
+        });
+    }
+
+    // 一级分类滚动事件
+    $('.nav-item').each(function () {
+        containerWidth += $(this).outerWidth();
+    });
+    $('.navigate .nav-container nav').width(containerWidth + 150);
+    new IScroll('.navigate .nav-container', {eventPassthrough: true, scrollX: true, scrollY: false, preventDefault: false});
+}
+
+$(function () {
+    var sortDown = $('.sort-menu'),
+            guideInstance = new GuideList();
+
+    GUIDE_CONFIG.subNavigete = {};
+    // 导航到分类
+    guideInstance.setNavigation();
+    // 设置pageNum
+    localStorage.setItem('pageNum', 1);
+    // 滚动到之前的位置
+    useIScroll();
+
+    $(document).click(function (event) {
+        var curTarget = $(event.target);
+
+        if (curTarget != sortDown && !curTarget.parents('.sort-menu').length) {
+            sortDown.removeClass('open')
+                    .find('.dm-icon')
+                    .removeClass('dm-icon-chevron-up')
+                    .addClass('dm-icon-chevron-down');
+        }
+    });
+
+    $('.sort-menu label').click(function () {
+        var icon = sortDown.find('.dm-icon');
+
+        sortDown.toggleClass('open');
+        icon.attr('class', 'dm-icon dm-icon-chevron-' + (icon.hasClass('dm-icon-chevron-up') ? 'down' : 'up'));
+    });
+
+    $('.sort-menu li').click(function () {
+        var _t = $(this),
+                key = _t.addClass('selected').attr('key');
+
+        _t.siblings('.selected').removeClass('selected');
+
+        guideInstance.getGuideList(true, guideInstance.getParams4List(key, true));
+
+        $('.sort-menu span.sort-type').html(key);
+        localStorage.setItem('key', key);
+        sortDown.removeClass('open')
+                .find('.dm-icon')
+                .removeClass('dm-icon-chevron-up')
+                .addClass('dm-icon-chevron-down');
+    });
+
+    /* 分类点击事件 */
+    $('nav span.nav-item').click(function () {
+        var _this = $(this).addClass('cur'),
+                id = _this.attr('cateid'),
+                target = $(_this.attr('href')),
+                key = $('.sort-menu span.sort-type').html();
+
+        _this.siblings('.cur').removeClass('cur');
+        localStorage.setItem('scrollTop', 0);
+        localStorage.removeItem('sub');
+
+        if (id) {
+            target.addClass('selected').find('.sub-nav-item:eq(0)').addClass('selected').siblings('.selected').removeClass('selected');
+
+            guideInstance.getGuideList(true, {
+                id: id,
+                level: 1,
+                pageNum: 1,
+                type: key == '热门' ? 4 : 3
+            });
+
+            target.parent().siblings().find('.selected').removeClass('selected');
+            guideInstance.setIScroll(target, id);
+
+            localStorage.setItem('top', id);
+        } else {
+            localStorage.removeItem('top');
+            // 获取所有内容
+            $('.sub-navigate ul.selected').removeClass('selected');
+
+            guideInstance.getGuideList(true, {
+                pageNum: 1,
+                type: key == '热门' ? 2 : 1
+            });
+        }
+
+        return false;
+    });
+
+    // 子类点击事件
+    $('.sub-nav-items .sub-nav-item').click(function () {
+        var _this = $(this),
+                key = $('.sort-menu span.sort-type').html();
+
+        _this.addClass('selected').siblings('.selected').removeClass('selected');
+        localStorage.setItem('scrollTop', $(document).scrollTop());
+
+        if (_this.attr('cateid')) {
+            guideInstance.getGuideList(true, {
+                id: _this.attr('cateid'),
+                level: 2,
+                pageNum: 1,
+                type: key == '热门' ? 4 : 3
+            });
+            localStorage.setItem('sub', _this.attr('cateid'));
+        } else {// 点击的是子类的全部分类
+            guideInstance.getGuideList(true, {
+                id: $('nav .cur').attr('cateid'),
+                level: 1,
+                pageNum: 1,
+                type: key == '热门' ? 4 : 3
+            });
+        }
+    });
+
+    $(document).on('scroll', function () {
+        localStorage.setItem('scrollTop', $(this).scrollTop());
+    });
+
+    // 跳转到详情页面
+    $('ul.guide-article-list').delegate('li.guide-article-info', 'click', function() {
+        localStorage.setItem('key', $('.sort-menu span.sort-type').html());
+        localStorage.setItem('pageNum', Math.ceil($('li.guide-article-info').length / guideInstance.pageSize));
+        localStorage.setItem('scrollTop', $('body').scrollTop());
+    	location.href = '/guide/' + $(this).attr('class').replace(/\D/g, '');
+    });
+
+    // 加载更多事件
+    $('.load-more').click(function () {
+        var key = $('.sort-menu span.sort-type').html();
+
+        $(this).addClass('hidden').next().addClass('isloading');
+
+        guideInstance.getGuideList(false, guideInstance.getParams4List(key, false));
+    });
+})
